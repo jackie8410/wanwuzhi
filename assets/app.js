@@ -1,6 +1,6 @@
 
 const BASE = '/wanwuzhi';
-const SITE_VERSION = '2026-05-27-100';
+const SITE_VERSION = '2026-05-27-101';
 const STAGES = [
   { key: 'beginner', label: '入门阶段' },
   { key: 'intermediate', label: '进阶阶段' },
