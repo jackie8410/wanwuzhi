@@ -1,0 +1,62 @@
+[
+  {
+    "id": 1,
+    "number": "第壹篇",
+    "title": "人性本质与精神世界",
+    "domainCount": 10
+  },
+  {
+    "id": 2,
+    "number": "第贰篇",
+    "title": "历史脉络与文明演进",
+    "domainCount": 10
+  },
+  {
+    "id": 3,
+    "number": "第叁篇",
+    "title": "社会运作与权力博弈",
+    "domainCount": 10
+  },
+  {
+    "id": 4,
+    "number": "第肆篇",
+    "title": "经济规律与财富创造",
+    "domainCount": 10
+  },
+  {
+    "id": 5,
+    "number": "第伍篇",
+    "title": "商业逻辑与创业实战",
+    "domainCount": 10
+  },
+  {
+    "id": 6,
+    "number": "第陆篇",
+    "title": "科学原理与工程应用",
+    "domainCount": 10
+  },
+  {
+    "id": 7,
+    "number": "第柒篇",
+    "title": "技术前沿与数字世界",
+    "domainCount": 10
+  },
+  {
+    "id": 8,
+    "number": "第捌篇",
+    "title": "美学表达与艺术创作",
+    "domainCount": 10
+  },
+  {
+    "id": 9,
+    "number": "第玖篇",
+    "title": "生活智慧与实用技能",
+    "domainCount": 10
+  },
+  {
+    "id": 10,
+    "number": "第拾篇",
+    "title": "宇宙规律与哲学思辨",
+    "domainCount": 10
+  }
+]

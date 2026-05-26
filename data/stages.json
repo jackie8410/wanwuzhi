@@ -1,0 +1,26 @@
+[
+  {
+    "key": "beginner",
+    "label": "入门阶段",
+    "level": 1,
+    "audience": "第一次系统接触该领域的学习者",
+    "verb": "建立概念地图",
+    "difficulty": "基础"
+  },
+  {
+    "key": "intermediate",
+    "label": "进阶阶段",
+    "level": 2,
+    "audience": "已经掌握基础概念、希望形成分析能力的学习者",
+    "verb": "拆解机制与案例",
+    "difficulty": "进阶"
+  },
+  {
+    "key": "advanced",
+    "label": "专家阶段",
+    "level": 3,
+    "audience": "希望形成研究、判断和实践输出能力的学习者",
+    "verb": "综合应用与独立判断",
+    "difficulty": "专家"
+  }
+]
