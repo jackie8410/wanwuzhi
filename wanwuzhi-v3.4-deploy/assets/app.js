@@ -1,5 +1,6 @@
 
 const BASE = '/wanwuzhi';
+const SITE_VERSION = '2026-05-27-100';
 const STAGES = [
   { key: 'beginner', label: '入门阶段' },
   { key: 'intermediate', label: '进阶阶段' },
@@ -11,7 +12,7 @@ const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 const app = $('#app');
 const asset = (p) => BASE + p;
 function h(str) { return String(str ?? '').replace(/[&<>"']/g, s => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[s])); }
-async function getJson(url) { const res = await fetch(asset(url)); if (!res.ok) throw new Error(url + ' ' + res.status); return res.json(); }
+async function getJson(url) { const res = await fetch(asset(url) + '?v=' + SITE_VERSION, { cache: 'no-store' }); if (!res.ok) throw new Error(url + ' ' + res.status); return res.json(); }
 async function loadCore() {
   if (state.domains.length) return;
   const [chapters, domains, books] = await Promise.all([getJson('/data/chapters.json'), getJson('/data/domains.json'), getJson('/data/books.json')]);
