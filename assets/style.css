@@ -659,6 +659,25 @@ footer {
   margin-bottom: 14px;
 }
 
+.section-kicker {
+  margin-bottom: 6px;
+  color: var(--gold);
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.benchmark {
+  max-width: 900px;
+  padding: 14px 16px;
+  border-left: 4px solid var(--green);
+  border-radius: 0 var(--radius) var(--radius) 0;
+  color: var(--ink);
+  background: color-mix(in srgb, var(--surface-2) 78%, transparent);
+  font-weight: 700;
+}
+
 .module-list,
 .exercise-list,
 .results {
@@ -697,6 +716,17 @@ footer {
   margin: 8px 0;
 }
 
+.academic-depth,
+.common-mistake {
+  padding: 12px;
+  border-radius: 7px;
+  background: var(--surface-2);
+}
+
+.common-mistake {
+  border-left: 3px solid var(--rose);
+}
+
 .checks {
   display: grid;
   gap: 8px;
@@ -713,6 +743,91 @@ footer {
 }
 
 .concept-card p {
+  color: var(--muted);
+}
+
+.wide-grid,
+.framework-grid,
+.method-list,
+.case-grid,
+.debate-list,
+.glossary-grid,
+.capstone-layout {
+  display: grid;
+  gap: 14px;
+}
+
+.wide-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.framework-grid,
+.case-grid,
+.glossary-grid {
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+}
+
+.method-list {
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+}
+
+.capstone-layout {
+  grid-template-columns: minmax(0, 1.15fr) minmax(280px, .85fr);
+}
+
+.wide-grid article,
+.framework-card,
+.method-card,
+.case-card,
+.debate-card,
+.glossary-grid article,
+.capstone article {
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: 0 8px 22px rgba(22, 32, 28, .05);
+}
+
+.wide-grid h3,
+.framework-card h3,
+.method-card h3,
+.case-card h3,
+.debate-card h3,
+.glossary-grid strong,
+.capstone h3 {
+  margin-top: 0;
+}
+
+.framework-card small,
+.case-card small,
+.debate-card small {
+  display: block;
+  padding-top: 10px;
+  color: var(--gold);
+  font-weight: 800;
+}
+
+.method-card ol,
+.capstone ol {
+  padding-left: 22px;
+}
+
+.debate-columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.debate-columns p {
+  margin: 0;
+  padding: 12px;
+  border-radius: 7px;
+  background: var(--surface-2);
+}
+
+.glossary-grid p {
+  margin-bottom: 0;
   color: var(--muted);
 }
 
@@ -1113,7 +1228,10 @@ textarea {
   .starter-grid,
   .stage-grid,
   .split,
-  .dashboard {
+  .dashboard,
+  .wide-grid,
+  .capstone-layout,
+  .debate-columns {
     grid-template-columns: 1fr;
   }
 

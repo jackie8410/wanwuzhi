@@ -1,6 +1,6 @@
 const scriptUrl = new URL(import.meta.url);
 const BASE_PATH = scriptUrl.pathname.replace(/\/assets\/app\.js.*$/, '').replace(/\/$/, '');
-const SITE_VERSION = '2026-05-27-200';
+const SITE_VERSION = '2026-05-27-201';
 
 const STAGES = [
   { key: 'beginner', label: '入门阶段', short: '入门', icon: '🚀', promise: '先建立概念边界，把陌生知识讲成人话。' },
@@ -461,6 +461,168 @@ function renderCoreConcepts(content) {
   `;
 }
 
+function renderAdvancedLearningSections(content) {
+  return `
+    ${renderKnowledgeMap(content.knowledgeMap, content.undergraduateBenchmark)}
+    ${renderFrameworks(content.frameworks)}
+    ${renderMethods(content.methods)}
+    ${renderCases(content.cases)}
+    ${renderDebates(content.debates)}
+    ${renderGlossary(content.glossary)}
+    ${renderCapstone(content.capstone, content.readingPlan)}
+  `;
+}
+
+function renderKnowledgeMap(map, benchmark) {
+  if (!map) return '';
+  return `
+    <section class="reading-section knowledge-map">
+      <div class="section-kicker">本科优秀毕业生基准</div>
+      <h2>知识地图</h2>
+      <p class="benchmark">${h(benchmark || map.outputStandard)}</p>
+      <div class="wide-grid">
+        <article>
+          <h3>中心问题</h3>
+          <p>${h(map.centralQuestion)}</p>
+        </article>
+        <article>
+          <h3>先修能力</h3>
+          <ul>${(map.prerequisites || []).map((item) => `<li>${h(item)}</li>`).join('')}</ul>
+        </article>
+        <article>
+          <h3>学习结构</h3>
+          <ul>${(map.structure || []).map((item) => `<li>${h(item)}</li>`).join('')}</ul>
+        </article>
+        <article>
+          <h3>输出标准</h3>
+          <p>${h(map.outputStandard)}</p>
+        </article>
+      </div>
+    </section>
+  `;
+}
+
+function renderFrameworks(frameworks = []) {
+  if (!frameworks.length) return '';
+  return `
+    <section class="reading-section">
+      <div class="section-kicker">Theory</div>
+      <h2>理论框架</h2>
+      <div class="framework-grid">
+        ${frameworks.map((item) => `
+          <article class="framework-card">
+            <h3>${h(item.name)}</h3>
+            <p>${h(item.use)}</p>
+            <small>${h(item.caution)}</small>
+          </article>
+        `).join('')}
+      </div>
+    </section>
+  `;
+}
+
+function renderMethods(methods = []) {
+  if (!methods.length) return '';
+  return `
+    <section class="reading-section">
+      <div class="section-kicker">Method</div>
+      <h2>研究方法</h2>
+      <div class="method-list">
+        ${methods.map((method) => `
+          <article class="method-card">
+            <h3>${h(method.name)}</h3>
+            <ol>${(method.steps || []).map((step) => `<li>${h(step)}</li>`).join('')}</ol>
+            <p><b>产出：</b>${h(method.deliverable)}</p>
+          </article>
+        `).join('')}
+      </div>
+    </section>
+  `;
+}
+
+function renderCases(cases = []) {
+  if (!cases.length) return '';
+  return `
+    <section class="reading-section">
+      <div class="section-kicker">Case Lab</div>
+      <h2>案例分析实验室</h2>
+      <div class="case-grid">
+        ${cases.map((item) => `
+          <article class="case-card">
+            <h3>${h(item.title)}</h3>
+            <p>${h(item.scene)}</p>
+            <ul>${(item.analysis || []).map((line) => `<li>${h(line)}</li>`).join('')}</ul>
+            <small>${h(item.task)}</small>
+          </article>
+        `).join('')}
+      </div>
+    </section>
+  `;
+}
+
+function renderDebates(debates = []) {
+  if (!debates.length) return '';
+  return `
+    <section class="reading-section">
+      <div class="section-kicker">Debate</div>
+      <h2>经典争议</h2>
+      <div class="debate-list">
+        ${debates.map((item) => `
+          <article class="debate-card">
+            <h3>${h(item.question)}</h3>
+            <div class="debate-columns">
+              <p><b>立场 A：</b>${h(item.positionA)}</p>
+              <p><b>立场 B：</b>${h(item.positionB)}</p>
+            </div>
+            <small>${h(item.synthesis)}</small>
+          </article>
+        `).join('')}
+      </div>
+    </section>
+  `;
+}
+
+function renderGlossary(glossary = []) {
+  if (!glossary.length) return '';
+  return `
+    <section class="reading-section">
+      <div class="section-kicker">Glossary</div>
+      <h2>术语表</h2>
+      <div class="glossary-grid">
+        ${glossary.map((item) => `
+          <article>
+            <strong>${h(item.term)}</strong>
+            <p>${h(item.definition)}</p>
+          </article>
+        `).join('')}
+      </div>
+    </section>
+  `;
+}
+
+function renderCapstone(capstone, readingPlan = []) {
+  if (!capstone) return '';
+  return `
+    <section class="reading-section capstone">
+      <div class="section-kicker">Capstone</div>
+      <h2>综合任务</h2>
+      <div class="capstone-layout">
+        <article>
+          <h3>${h(capstone.title)}</h3>
+          <p>${h(capstone.brief)}</p>
+          <p><b>最终产出：</b>${h(capstone.output)}</p>
+          <h4>评分 Rubric</h4>
+          <ul>${(capstone.rubric || []).map((item) => `<li><b>${h(item.criterion)}：</b>${h(item.standard)}</li>`).join('')}</ul>
+        </article>
+        <article>
+          <h3>四周学习节奏</h3>
+          <ol>${readingPlan.map((item) => `<li>${h(item)}</li>`).join('')}</ol>
+        </article>
+      </div>
+    </section>
+  `;
+}
+
 function moduleBlock(module, index) {
   return `
     <details class="module" ${index === 0 ? 'open' : ''}>
@@ -469,7 +631,9 @@ function moduleBlock(module, index) {
         <strong>${h(module.title)}</strong>
         <small>${h(module.focus)} · ${module.estimatedMinutes} 分钟</small>
       </summary>
+      ${module.academicDepth ? `<p class="academic-depth">${h(module.academicDepth)}</p>` : ''}
       <ul>${module.keyPoints.map((point) => `<li>${h(point)}</li>`).join('')}</ul>
+      ${module.commonMistake ? `<p class="common-mistake"><b>常见误区：</b>${h(module.commonMistake)}</p>` : ''}
       <p><b>实践：</b>${h(module.practice)}</p>
       <div class="checks">
         ${module.checklist.map((item) => `<label><input type="checkbox" /> ${h(item)}</label>`).join('')}
@@ -555,6 +719,7 @@ async function renderStage(id, stageKey) {
     </section>
 
     ${renderCoreConcepts(content)}
+    ${renderAdvancedLearningSections(content)}
 
     <section class="reading-section">
       <h2>练习巩固</h2>
