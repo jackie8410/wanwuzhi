@@ -1,0 +1,11 @@
+{
+  "name": "wanwuzhi",
+  "version": "4.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build-curriculum.mjs",
+    "test": "node --check assets/app.js && node --test scripts/labs.test.mjs && node scripts/validate-curriculum.mjs",
+    "preview": "python -m http.server 4173 --bind 127.0.0.1"
+  }
+}

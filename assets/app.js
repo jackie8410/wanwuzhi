@@ -1,1023 +1,260 @@
-const scriptUrl = new URL(import.meta.url);
-const BASE_PATH = scriptUrl.pathname.replace(/\/assets\/app\.js.*$/, '').replace(/\/$/, '');
-const SITE_VERSION = '2026-05-27-201';
-
-const STAGES = [
-  { key: 'beginner', label: '入门阶段', short: '入门', icon: '🚀', promise: '先建立概念边界，把陌生知识讲成人话。' },
-  { key: 'intermediate', label: '进阶阶段', short: '进阶', icon: '🧠', promise: '拆解机制、案例和方法，开始能解释真实问题。' },
-  { key: 'advanced', label: '专家阶段', short: '专家', icon: '👑', promise: '形成独立判断，输出自己的知识作品。' }
-];
-
-const STAGE_BY_KEY = Object.fromEntries(STAGES.map((stage) => [stage.key, stage]));
-const STAGE_LABEL_TO_KEY = {
-  入门阶段: 'beginner',
-  进阶阶段: 'intermediate',
-  专家阶段: 'advanced'
-};
-
-const state = {
-  chapters: [],
-  domains: [],
-  books: [],
-  searchIndex: [],
-  stageCache: new Map(),
-  corePromise: null,
-  booksError: null
-};
-
+import { labMarkup, bindLab } from './labs.js?v=2026-11-02-v4';
+const VERSION = '2026-11-02-v4';
+const BASE = new URL('../', import.meta.url);
+const STAGES = [{ key: 'beginner', label: '入门', description: '理解概念与直觉' }, { key: 'intermediate', label: '进阶', description: '推演机制与方法' }, { key: 'advanced', label: '综合研习', description: '检验论证与完成项目' }];
 const app = document.querySelector('#app');
-const $ = (selector, root = document) => root.querySelector(selector);
-const $$ = (selector, root = document) => Array.from(root.querySelectorAll(selector));
-
-function asset(path = '') {
-  if (/^(https?:)?\/\//.test(path) || path.startsWith('data:')) return path;
-  const clean = String(path || '')
-    .replace(/^\/wanwuzhi\//, '/')
-    .replace(/^\.\//, '/');
-  if (!clean) return BASE_PATH || '/';
-  return `${BASE_PATH}${clean.startsWith('/') ? clean : `/${clean}`}`;
-}
-
-function cacheBusted(path) {
-  return `${asset(path)}?v=${encodeURIComponent(SITE_VERSION)}`;
-}
-
-function h(value) {
-  return String(value ?? '').replace(/[&<>"']/g, (char) => ({
-    '&': '&amp;',
-    '<': '&lt;',
-    '>': '&gt;',
-    '"': '&quot;',
-    "'": '&#39;'
-  })[char]);
-}
-
-async function getJson(path) {
-  const response = await fetch(cacheBusted(path), { cache: 'no-store' });
-  if (!response.ok) throw new Error(`${path} 加载失败：${response.status}`);
+const h = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+const asset = path => new URL(path.replace(/^\//, ''), BASE).href;
+const $ = selector => document.querySelector(selector);
+const $$ = selector => [...document.querySelectorAll(selector)];
+const list = items => `<ul>${items.map(item => `<li>${h(item)}</li>`).join('')}</ul>`;
+const state = { domains: [], chapters: [], curricula: new Map(), index: null };
+let routeVersion = 0;
+let cleanup = () => {};
+let storageFailed = false;
+const memory = new Map();
+const storage = {
+  get(key) { try { return localStorage.getItem(key); } catch { storageFailed = true; return memory.get(key) ?? null; } },
+  set(key, value) { try { localStorage.setItem(key, value); } catch { storageFailed = true; memory.set(key, value); } },
+  remove(key) { try { localStorage.removeItem(key); } catch { memory.delete(key); } }
+};
+const key = (type, id, stage) => `wanwuzhi:${type}:${id}${stage ? `:${stage}` : ''}`;
+const done = (id, stage) => storage.get(key('progress', id, stage)) === 'done';
+const fav = id => storage.get(key('fav', id)) === '1';
+const count = id => STAGES.filter(s => done(id, s.key)).length;
+const getRecord = (id, stage) => { try { const raw = storage.get(key('review', id, stage)); return raw && validBackupValue(key('review', id, stage), raw) ? JSON.parse(raw) : null; } catch { return null; } };
+async function json(path) {
+  const response = await fetch(`${asset(path)}?v=${VERSION}`);
+  if (!response.ok) throw new Error(`资料加载失败（${response.status}），请稍后重试。`);
   return response.json();
 }
-
-async function loadCore() {
-  if (state.corePromise) return state.corePromise;
-  state.corePromise = Promise.all([
-    getJson('/data/chapters.json'),
-    getJson('/data/domains.json'),
-    getJson('/data/books.json').catch((error) => {
-      state.booksError = error;
-      return [];
-    })
-  ]).then(([chapters, domains, books]) => {
-    state.chapters = chapters;
-    state.domains = domains;
-    state.books = books.map(normalizeBook);
-  });
-  return state.corePromise;
-}
-
-async function loadStage(domainId, stageKey) {
-  const cacheKey = `${domainId}:${stageKey}`;
-  if (state.stageCache.has(cacheKey)) return state.stageCache.get(cacheKey);
-
-  const content = await getJson(`/content/${domainId}/${stageKey}.json`);
-  const domain = state.domains.find((item) => item.id === Number(domainId));
-  if (!domain || content.domainId !== domain.id || content.domainTitle !== domain.title || content.stageKey !== stageKey) {
-    throw new Error(`学习内容与领域元数据不一致：${cacheKey}`);
+async function curriculum(id) {
+  if (!state.curricula.has(Number(id))) {
+    const data = await json(`data/curricula/${id}.json`);
+    if (data.domainId !== Number(id)) throw new Error('课程与领域编号不符。');
+    state.curricula.set(Number(id), data);
   }
-
-  state.stageCache.set(cacheKey, content);
-  return content;
+  return state.curricula.get(Number(id));
 }
-
-function normalizeBook(book) {
-  const domain = state.domains.find((item) => item.id === Number(book.domainId));
-  const stageKey = book.stageKey || STAGE_LABEL_TO_KEY[book.LearningStage] || '';
-  const stage = STAGE_BY_KEY[stageKey];
-  const purchaseType = book.purchaseType === 'store_qrcode' ? 'qrcode' : (book.purchaseType || '');
-
-  return {
-    ...book,
-    ID: book.ID || book.id || `book-${book.domainId || 'x'}-${stageKey || 'stage'}`,
-    ExplorationDomain: book.ExplorationDomain || domain?.title || book.domainTitle || '',
-    LearningStage: book.LearningStage || stage?.label || book.stageLabel || '',
-    title: book.title || '未命名书籍',
-    author: book.author || '作者待补充',
-    description: book.description || book.reason || book.coverHint || '这本书适合作为本阶段学习的延伸阅读。',
-    purchaseType,
-    purchaseUrl: book.purchaseUrl || '',
-    purchaseQrCode: book.purchaseQrCode || '/qr/store-qr.png'
-  };
-}
-
-function progressKey(domainId, stageKey) {
-  return `wanwuzhi:progress:${domainId}:${stageKey}`;
-}
-
-function noteKey(domainId, stageKey) {
-  return `wanwuzhi:note:${domainId}:${stageKey}`;
-}
-
-function favKey(domainId) {
-  return `wanwuzhi:fav:${domainId}`;
-}
-
-function isDone(domainId, stageKey) {
-  return localStorage.getItem(progressKey(domainId, stageKey)) === 'done';
-}
-
-function setDone(domainId, stageKey, done) {
-  if (done) localStorage.setItem(progressKey(domainId, stageKey), 'done');
-  else localStorage.removeItem(progressKey(domainId, stageKey));
-}
-
-function isFav(domainId) {
-  return localStorage.getItem(favKey(domainId)) === '1';
-}
-
-function isStageUnlocked(domainId, stageKey) {
-  if (stageKey === 'beginner') return true;
-  if (stageKey === 'intermediate') return isDone(domainId, 'beginner');
-  if (stageKey === 'advanced') return isDone(domainId, 'intermediate');
-  return false;
-}
-
-function completedCount(domainId) {
-  return STAGES.filter((stage) => isDone(domainId, stage.key)).length;
-}
-
-function nav() {
-  return `
-    <header class="topbar">
-      <a class="brand" href="#/" aria-label="返回首页">
-        <span class="brand-mark">万</span>
-        <span><b>世间万物</b><small>Wanwuzhi</small></span>
-      </a>
-      <nav aria-label="主导航">
-        <a href="#/explore">探索</a>
-        <a href="#/roadmap">路径</a>
-        <a href="#/search">搜索</a>
-        <a href="#/dashboard">学习台</a>
-        <a href="#/admin">管理</a>
-      </nav>
-    </header>
-  `;
-}
-
-function layout(inner, options = {}) {
-  document.documentElement.dataset.theme = localStorage.getItem('wanwuzhi:theme') || 'light';
-  app.classList.remove('view-enter');
-  app.innerHTML = `${nav()}<main>${inner}</main><footer>探索知识的边界，从入门到精通 · 微信视频号带货书单已接入本地 JSON 数据</footer><div id="toast"></div>`;
-  requestAnimationFrame(() => app.classList.add('view-enter'));
-  bindGlobal();
-  if (options.bind) options.bind();
-}
-
 function toast(message) {
-  const element = $('#toast');
-  if (!element) return;
-  element.textContent = message;
-  element.classList.add('show');
-  window.setTimeout(() => element.classList.remove('show'), 1800);
+  const el = $('#toast');
+  if (el) { el.textContent = message; el.classList.add('visible'); setTimeout(() => el.classList.remove('visible'), 2600); }
 }
-
-function bindGlobal() {
-  $$('.js-theme').forEach((button) => {
-    button.addEventListener('click', () => {
-      const next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
-      localStorage.setItem('wanwuzhi:theme', next);
-      document.documentElement.dataset.theme = next;
-    });
-  });
-
-  $$('.js-qr-open').forEach((button) => {
-    button.addEventListener('click', () => {
-      showQrModal({
-        title: button.dataset.title || '万物小店橱窗',
-        src: button.dataset.src || '/qr/store-qr.png',
-        hint: button.dataset.hint || '扫码进入万物小店橱窗，探索更多好书'
-      });
-    });
-  });
+function applyPreferences() {
+  document.documentElement.dataset.theme = storage.get('wanwuzhi:theme') || 'light';
+  document.documentElement.dataset.font = storage.get('wanwuzhi:font') || 'normal';
 }
-
-function showQrModal({ title, src, hint }) {
-  const existing = $('.modal');
-  if (existing) existing.remove();
-
-  const modal = document.createElement('div');
-  modal.className = 'modal';
-  modal.innerHTML = `
-    <div class="modal-panel" role="dialog" aria-modal="true" aria-label="${h(title)}">
-      <button class="icon close" aria-label="关闭弹窗">×</button>
-      <p class="eyebrow">微信视频号橱窗</p>
-      <h2>${h(title)}</h2>
-      <img src="${asset(src)}" alt="${h(title)}二维码" />
-      <p class="modal-hint">${h(hint)}</p>
-    </div>
-  `;
-
-  const close = () => {
-    modal.classList.remove('show');
-    window.setTimeout(() => modal.remove(), 180);
-    document.body.classList.remove('modal-open');
-  };
-  modal.addEventListener('click', (event) => {
-    if (event.target === modal || event.target.classList.contains('close')) close();
-  });
-  document.addEventListener('keydown', function onEscape(event) {
-    if (event.key === 'Escape' && document.body.contains(modal)) {
-      close();
-      document.removeEventListener('keydown', onEscape);
-    }
-  });
-
-  document.body.appendChild(modal);
-  document.body.classList.add('modal-open');
-  requestAnimationFrame(() => modal.classList.add('show'));
+function layout(content, title = '世间万物', bind = () => {}) {
+  cleanup(); cleanup = () => {};
+  document.title = `${title} · 成年人的知识地图`;
+  const route = location.hash.split('?')[0] || '#/';
+  app.innerHTML = `<a class="skip" href="#main">跳到主要内容</a>
+    <header class="topbar"><a class="brand" href="#/"><span class="brand-mark">万</span><span><b>世间万物</b><small>LEARN FOR EVERYTHING</small></span></a>
+    <nav aria-label="主导航">${[['#/', '首页'], ['#/explore', '知识地图'], ['#/roadmap', '学习路径'], ['#/search', '搜索'], ['#/dashboard', '学习台']].map(([url, label]) => `<a ${route === url ? 'aria-current="page"' : ''} href="${url}">${label}</a>`).join('')}</nav>
+    <button class="icon theme" aria-label="切换明暗阅读模式">◐</button></header>
+    <main id="main" tabindex="-1">${content}</main>
+    <footer><div><b>世间万物</b><p>从一个好问题出发，逐步理解世界。</p></div><div><a href="#/about">内容标准</a><button class="text-button qr-open">万物小店 ↗</button><span>V4 · 2026.11</span></div></footer>
+    <div id="toast" role="status" aria-live="polite"></div>`;
+  applyPreferences();
+  $('.skip').addEventListener('click', event => { event.preventDefault(); $('#main').focus(); $('#main').scrollIntoView(); });
+  $('.theme').addEventListener('click', () => { storage.set('wanwuzhi:theme', document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'); applyPreferences(); });
+  $$('.qr-open').forEach(button => button.addEventListener('click', showQr));
+  $$('.favorite').forEach(button => button.addEventListener('click', () => {
+    const id = button.dataset.id;
+    const value = !fav(id);
+    if (value) storage.set(key('fav', id), '1'); else storage.remove(key('fav', id));
+    button.textContent = value ? '★' : '☆'; button.setAttribute('aria-pressed', String(value)); toast(value ? '已加入收藏' : '已取消收藏');
+  }));
+  bind();
+  if (storageFailed) toast('浏览器限制了本地保存，本次学习记录仅在当前页面有效。');
 }
-
-function heroStats() {
-  const done = STAGES.flatMap((stage) => state.domains.map((domain) => isDone(domain.id, stage.key))).filter(Boolean).length;
-  return `
-    <div class="stats" aria-label="平台数据">
-      <span><b>10</b>知识篇章</span>
-      <span><b>100</b>领域地图</span>
-      <span><b>300</b>阶段课程</span>
-      <span><b>${done}</b>已完成</span>
-    </div>
-  `;
+function showQr() {
+  if (document.querySelector('.qr-dialog')) return;
+  const previousCleanup = cleanup;
+  const previous = document.activeElement;
+  const dialog = document.createElement('dialog');
+  dialog.className = 'qr-dialog';
+  dialog.innerHTML = `<button class="dialog-close icon" aria-label="关闭小店二维码">×</button><p class="eyebrow">万物小店</p><h2>把好书带回生活</h2><img src="${asset('qr/store-qr.png')}" alt="微信小店橱窗二维码" width="280" height="280"><p>请用微信扫码；手机上可保存二维码后在微信识别。</p><a class="button secondary" href="${asset('qr/store-qr.png')}" download="万物小店二维码.png">保存二维码</a><p class="muted">课程中的开放教材可直接免费阅读。店铺在售书籍以实际橱窗为准。</p>`;
+  document.body.append(dialog);
+  const close = () => dialog.close();
+  $('.dialog-close').addEventListener('click', close);
+  dialog.addEventListener('click', event => { if (event.target === dialog) { const r = dialog.getBoundingClientRect(); if (event.clientX < r.left || event.clientX > r.right || event.clientY < r.top || event.clientY > r.bottom) close(); } });
+  dialog.addEventListener('close', () => { dialog.remove(); document.body.classList.remove('modal-open'); previous?.focus(); }, { once: true });
+  document.body.classList.add('modal-open'); dialog.showModal();
+  cleanup = () => { previousCleanup(); if (dialog.open) dialog.close(); };
 }
-
-function chapterImage(chapterId) {
-  return asset(`/chapter-${String(chapterId).padStart(2, '0')}.jpg`);
+function card(domain) {
+  return `<article class="domain-card"><div class="card-meta"><span>${h(domain.chapterTitle)}</span><button class="favorite icon" data-id="${domain.id}" aria-label="收藏${h(domain.title)}" aria-pressed="${fav(domain.id)}">${fav(domain.id) ? '★' : '☆'}</button></div><h3><a href="#/domain/${domain.id}">${h(domain.title)}</a></h3><p>${h(domain.summary)}</p><div class="card-bottom"><span>${count(domain.id)}/3 已研习</span><a href="#/domain/${domain.id}/stage/beginner">开始学习 <span aria-hidden="true">↗</span></a></div></article>`;
 }
-
-function renderHome() {
-  const todayDomain = state.domains[81] || state.domains[0];
-  const beginnerDomains = state.domains.slice(0, 6);
-
-  layout(`
-    <section class="home-shell">
-      <div class="hero-banner" style="--hero-image:url('${asset('/hero-bg.png')}')">
-        <div class="hero-copy">
-          <p class="eyebrow">今日探索</p>
-          <h1>世间万物</h1>
-          <p class="lead">探索知识的边界，从入门到精通。用 10 大篇章、100 个知识领域和 3 阶段路径，把复杂世界拆成普通人也能走下去的学习地图。</p>
-          <div class="actions">
-            <a class="primary" href="#/domain/${todayDomain.id}/stage/beginner">开始今日探索</a>
-            <button class="secondary js-theme" type="button">切换阅读模式</button>
-          </div>
-          ${heroStats()}
-        </div>
-      </div>
-    </section>
-
-    <section class="section-stack">
-      <div class="section-title">
-        <div>
-          <p class="eyebrow">Beginner First</p>
-          <h2>新手必读</h2>
-        </div>
-        <a href="#/explore">查看全部</a>
-      </div>
-      <div class="starter-grid">
-        ${beginnerDomains.map((domain) => domainCard(domain, true)).join('')}
-      </div>
-    </section>
-
-    <section class="section-stack">
-      <div class="section-title">
-        <div>
-          <p class="eyebrow">Knowledge Universe</p>
-          <h2>十大知识宇宙</h2>
-        </div>
-        <span>横向滑动</span>
-      </div>
-      <div class="chapter-rail">
-        ${state.chapters.map((chapter) => `
-          <a class="chapter-card" href="#/explore?chapter=${chapter.id}" style="--chapter-image:url('${chapterImage(chapter.id)}')">
-            <small>${h(chapter.number)}</small>
-            <strong>${h(chapter.title)}</strong>
-            <span>${chapter.domainCount || 10} 个领域</span>
-          </a>
-        `).join('')}
-      </div>
-    </section>
-  `, { bind: bindExploreButtons });
+function sectionHead(kicker, title, tail = '') { return `<div class="section-head"><div><p class="eyebrow">${kicker}</p><h2>${title}</h2></div>${tail}</div>`; }
+function home() {
+  const last = storage.get('wanwuzhi:last');
+  const ids = [3, 31, 51, 61, 91, 82];
+  layout(`<section class="hero container"><div class="hero-copy"><p class="eyebrow"><span class="live-dot"></span> 为好奇心，建立一条长路</p><h1>从头开始，<br>重新认识<span>这个世界。</span></h1><p class="hero-intro">关于人性、文明、科学与生活。把零散的信息，变成可以理解、检验和运用的知识。</p><div class="actions"><a class="button primary" href="${last && /^#\/domain\/\d+\/stage\/(beginner|intermediate|advanced)$/.test(last) ? h(last) : '#/explore'}">${last ? '继续上次学习' : '打开知识地图'} <span>↗</span></a><a class="button secondary" href="#/roadmap">零基础从哪里开始</a></div><div class="hero-numbers"><span><b>10</b> 大知识篇章</span><span><b>100</b> 个探索领域</span><span><b>300</b> 节递进研习</span></div></div><div class="hero-art" aria-hidden="true"><div class="orbit orbit-a"></div><div class="orbit orbit-b"></div><div class="orbit orbit-c"></div><span class="orbit-label one">人性 · HUMANITY</span><span class="orbit-label two">科学 · SCIENCE</span><span class="orbit-label three">文明 · CIVILIZATION</span><div class="orbit-core">万<span>让知识发生连接</span></div><p>EVERYTHING IS CONNECTED</p></div></section>
+    <section class="intro-strip"><div class="container"><span>01 <b>读懂原理</b> 原创讲解与关键概念</span><span>02 <b>亲手验证</b> 算例、练习与即时解析</span><span>03 <b>走向深入</b> 开放教材与独立项目</span></div></section>
+    <section class="container block">${sectionHead('A PLACE TO START', '先从这些问题出发', '<a href="#/explore">查看全部领域 ↗</a>')}<div class="domain-grid">${ids.map(id => card(state.domains.find(d => d.id === id))).join('')}</div></section>
+    <section class="container block">${sectionHead('THE KNOWLEDGE ATLAS', '十个入口，一张世界地图')}<div class="chapter-grid">${state.chapters.map(c => `<a class="chapter-card" href="#/explore?chapter=${c.id}"><img loading="lazy" width="320" height="170" src="${asset(`chapter-${String(c.id).padStart(2, '0')}.jpg`)}" alt=""><div><span>${String(c.id).padStart(2, '0')} / 10 个领域</span><h3>${h(c.title)}</h3><b aria-hidden="true">↗</b></div></a>`).join('')}</div></section>
+    <section class="container block"><div class="learning-contract"><p class="eyebrow">好学习，需要真实的尺度</p><h2>以优秀本科毕业生的能力为方向。</h2><p>这里是通往学科的窗口。用研习课理解核心问题，沿开放教材补齐课程，再用练习、阅读和项目检验自己。阅读进度与知识掌握分开记录，长期积累才能形成扎实判断。</p><a href="#/about">阅读内容与评价标准 ↗</a></div></section>`);
 }
-
-function domainCard(domain, compact = false) {
-  const count = completedCount(domain.id);
-  return `
-    <article class="domain-card ${compact ? 'compact' : ''}">
-      <button class="fav js-fav" data-id="${domain.id}" type="button" aria-label="收藏 ${h(domain.title)}">${isFav(domain.id) ? '★' : '☆'}</button>
-      <small>${h(domain.chapterTitle)}</small>
-      <h3>${h(domain.title)}</h3>
-      <p>${h(domain.summary)}</p>
-      <div class="mini-progress" aria-label="完成进度 ${count}/3"><i style="width:${count / 3 * 100}%"></i></div>
-      <div class="card-actions">
-        <a href="#/domain/${domain.id}">查看路径</a>
-        <a href="#/domain/${domain.id}/stage/beginner">开始学习</a>
-      </div>
-    </article>
-  `;
-}
-
-function bindExploreButtons() {
-  $$('.js-fav').forEach((button) => {
-    button.addEventListener('click', () => {
-      const id = button.dataset.id;
-      const next = !isFav(id);
-      if (next) localStorage.setItem(favKey(id), '1');
-      else localStorage.removeItem(favKey(id));
-      button.textContent = next ? '★' : '☆';
-      toast(next ? '已收藏领域' : '已取消收藏');
-    });
+function explore() {
+  const selected = Number(new URLSearchParams(location.hash.split('?')[1]).get('chapter')) || 0;
+  layout(`<section class="container block"><p class="eyebrow">THE KNOWLEDGE ATLAS</p><h1>你的世界，从这里展开。</h1><p class="lead">按兴趣选择入口，按问题连接学科。三个阶段全部开放，可随时回看与预习。</p><label class="search-label" for="domainSearch">查找领域</label><input id="domainSearch" class="search-input" type="search" placeholder="搜索领域、概念或问题"><div class="chapter-tabs" aria-label="按篇章筛选"><a ${!selected ? 'aria-current="true"' : ''} href="#/explore">全部领域</a>${state.chapters.map(c => `<a ${selected === c.id ? 'aria-current="true"' : ''} href="#/explore?chapter=${c.id}">${h(c.title)}</a>`).join('')}</div><p id="resultCount" class="muted" role="status"></p><div id="domainGrid" class="domain-grid"></div></section>`, '知识地图', () => {
+    const filter = () => {
+      const q = $('#domainSearch').value.trim().toLowerCase();
+      const domains = state.domains.filter(d => (!selected || d.chapterId === selected) && `${d.title}${d.summary}${d.tags.join('')}`.toLowerCase().includes(q));
+      $('#resultCount').textContent = `找到 ${domains.length} 个领域`;
+      $('#domainGrid').innerHTML = domains.map(card).join('') || '<p class="empty">没有找到，试试更宽泛的关键词。</p>';
+      $$('#domainGrid .favorite').forEach(button => button.addEventListener('click', () => { const id = button.dataset.id; if (fav(id)) storage.remove(key('fav', id)); else storage.set(key('fav', id), '1'); button.textContent = fav(id) ? '★' : '☆'; button.setAttribute('aria-pressed', String(fav(id))); }));
+    };
+    $('#domainSearch').addEventListener('input', filter); filter();
   });
 }
-
-function renderExplore() {
-  const params = new URLSearchParams(location.hash.split('?')[1] || '');
-  const chapterId = Number(params.get('chapter') || 0);
-  const filtered = chapterId ? state.domains.filter((domain) => domain.chapterId === chapterId) : state.domains;
-
-  layout(`
-    <section class="page-head">
-      <p class="eyebrow">Explore</p>
-      <h1>100 个知识领域</h1>
-      <p>按篇章筛选，或直接搜索领域标题、标签和摘要。每个领域都被拆成入门、进阶、专家三段学习路径。</p>
-    </section>
-    <section class="tools">
-      <input id="domainSearch" type="search" placeholder="搜索领域，如 哲学、人工智能、宇宙观" />
-      <div class="tabs" aria-label="篇章筛选">
-        <a class="${chapterId ? '' : 'active'}" href="#/explore">全部</a>
-        ${state.chapters.map((chapter) => `<a class="${chapterId === chapter.id ? 'active' : ''}" href="#/explore?chapter=${chapter.id}">${chapter.id}</a>`).join('')}
-      </div>
-    </section>
-    <section id="domainGrid" class="domain-grid">
-      ${filtered.map((domain) => domainCard(domain)).join('')}
-    </section>
-  `, {
-    bind: () => {
-      const input = $('#domainSearch');
-      input.addEventListener('input', () => {
-        const query = input.value.trim().toLowerCase();
-        const list = filtered.filter((domain) => `${domain.title}${domain.chapterTitle}${domain.summary}${domain.tags.join('')}`.toLowerCase().includes(query));
-        $('#domainGrid').innerHTML = list.map((domain) => domainCard(domain)).join('') || '<p class="empty">没有匹配结果，换一个关键词试试。</p>';
-        bindExploreButtons();
-      });
-      bindExploreButtons();
-    }
-  });
+function stageNav(id, active = '') { return `<nav class="stage-nav" aria-label="领域研习阶段">${STAGES.map((s, i) => `<a ${s.key === active ? 'aria-current="step"' : ''} href="#/domain/${id}/stage/${s.key}"><span>0${i + 1}</span><b>${s.label}</b><small>${done(id, s.key) ? '已研习 ✓' : s.description}</small></a>`).join('')}</nav>`; }
+function sourceCards(course) { return `<div class="sources">${course.sources.map(s => `<a href="${h(s.url)}" target="_blank" rel="noopener noreferrer"><span class="source-host">${h(new URL(s.url).hostname)}</span><h3>${h(s.title)} ↗</h3><p>${h(s.note)}</p></a>`).join('')}</div><p class="muted small">外部资料有中英文版本；可配合浏览器翻译阅读，术语与公式请对照原文。资源可能随出版机构调整。</p>`; }
+function store() { return `<aside class="store-callout"><div><p class="eyebrow">延伸阅读</p><h3>让阅读延续到书页之外</h3><p>开放教材可直接阅读。需要纸质书时，可以到万物小店看看，实际库存以橱窗为准。</p><button class="button secondary qr-open">打开微信小店二维码 ↗</button></div><img src="${asset('qr/store-qr.png')}" alt="微信小店二维码" width="132" height="132" loading="lazy"></aside>`; }
+async function domainPage(id, token) {
+  const d = state.domains.find(d => d.id === Number(id));
+  if (!d) return notFound();
+  const course = await curriculum(id); if (token !== routeVersion) return;
+  layout(`<section class="container block"><a class="back-link" href="#/explore?chapter=${d.chapterId}">← ${h(d.chapterTitle)}</a><p class="eyebrow">DOMAIN ${String(id).padStart(3, '0')}</p><h1>${h(d.title)}</h1><p class="lead">${h(course.question)}</p>${stageNav(id)}<div class="two-col domain-overview"><div class="panel"><h2>你将学会什么</h2>${list(course.outcomes)}</div><div class="panel"><h2>先修与投入</h2>${list(course.prerequisites)}<p class="muted">建议完整研习约 ${course.hours} 小时，含教材、练习与项目。按个人基础调整。</p></div></div><div class="domain-grid">${course.stages.map((s, i) => `<article class="panel"><p class="eyebrow">0${i + 1} · ${STAGES[i].label}</p><h2>${h(s.title)}</h2><p>${h(s.lesson[0].slice(0, 110))}…</p><a class="button secondary" href="#/domain/${id}/stage/${s.key}">进入研习 ↗</a></article>`).join('')}</div></section><section class="container block">${sectionHead('READ THE ORIGINALS', '沿着教材，继续深入')}${sourceCards(course)}${store()}</section><section class="container block">${sectionHead('MAKE CONNECTIONS', '把知识连起来')}<div class="domain-grid">${course.connections.map(id => state.domains.find(d => d.id === id)).filter(Boolean).map(card).join('')}</div></section>`, d.title);
 }
-
-function stageProgressNav(domainId, activeStageKey = '') {
-  return `
-    <nav class="stage-progress" aria-label="渐进式学习路径">
-      ${STAGES.map((stage, index) => {
-        const unlocked = isStageUnlocked(domainId, stage.key);
-        const done = isDone(domainId, stage.key);
-        const classes = [
-          activeStageKey === stage.key ? 'active' : '',
-          done ? 'done' : '',
-          unlocked ? '' : 'locked'
-        ].filter(Boolean).join(' ');
-        const href = unlocked ? `href="#/domain/${domainId}/stage/${stage.key}"` : 'aria-disabled="true"';
-        return `
-          <a class="${classes}" ${href}>
-            <span>${stage.icon}</span>
-            <b>${stage.short}</b>
-            <small>${done ? '已完成' : unlocked ? (index === 0 ? '可开始' : '已解锁') : '待解锁'}</small>
-          </a>
-        `;
-      }).join('')}
-    </nav>
-  `;
+function quizBlock(q, index) {
+  return `<fieldset class="quiz" data-index="${index}"><legend>${index + 1}. ${h(q.question)}</legend>${q.options.map((option, i) => `<label><input type="radio" name="quiz-${index}" value="${i}"><span>${h(option)}</span></label>`).join('')}<p class="quiz-feedback" role="status"></p></fieldset>`;
 }
-
-function renderDomain(id) {
-  const domain = state.domains.find((item) => item.id === Number(id));
-  if (!domain) return render404();
-
-  layout(`
-    <section class="page-head domain-head">
-      <p class="eyebrow">${h(domain.chapterTitle)}</p>
-      <h1>${h(domain.title)}</h1>
-      <p>${h(domain.summary)}</p>
-      ${stageProgressNav(domain.id)}
-    </section>
-    <section class="stage-grid">
-      ${STAGES.map((stage) => {
-        const unlocked = isStageUnlocked(domain.id, stage.key);
-        return `
-          <article class="stage-card ${unlocked ? '' : 'locked'}">
-            <small>${unlocked ? '已开放' : '完成上一阶段后解锁'}</small>
-            <h2><span>${stage.icon}</span>${stage.label}</h2>
-            <p>${stage.promise}</p>
-            ${unlocked ? `<a href="#/domain/${domain.id}/stage/${stage.key}">进入${stage.short}</a>` : '<button disabled type="button">阶段锁定</button>'}
-          </article>
-        `;
-      }).join('')}
-    </section>
-    <section class="split">
-      <div>
-        <h2>学习目标</h2>
-        <ul>${domain.objectives.map((item) => `<li>${h(item)}</li>`).join('')}</ul>
-      </div>
-      <div class="store">
-        <h2>万物小店</h2>
-        <p>推荐书籍已从学习内容中解耦，由本地 <code>data/books.json</code> 统一管理。改一本书，全站同步。</p>
-        <button class="primary js-qr-open" type="button" data-title="万物小店橱窗" data-src="/qr/store-qr.png">打开店铺二维码</button>
-      </div>
-    </section>
-  `);
+async function stagePage(id, stageKey, token) {
+  const d = state.domains.find(d => d.id === Number(id));
+  if (!d) return notFound();
+  const course = await curriculum(id); if (token !== routeVersion) return;
+  const lesson = course.stages.find(s => s.key === stageKey); if (!lesson) return notFound();
+  const index = STAGES.findIndex(s => s.key === stageKey);
+  const minutes = Math.max(6, Math.ceil(JSON.stringify(lesson).length / 350));
+  storage.set('wanwuzhi:last', `#/domain/${id}/stage/${stageKey}`);
+  const sections = [['principle', '原理讲解'], ['concepts', '关键概念'], ['example', '一起推演'], ['practice', '练习与测验'], ['project', '项目与导师'], ['sources', '教材与笔记']];
+  layout(`<div class="reading-progress" aria-hidden="true"><i id="readingProgress"></i></div><section class="container reader-heading"><a class="back-link" href="#/domain/${id}">← ${h(d.title)}</a><p class="eyebrow">${h(d.chapterTitle)} / ${STAGES[index].label}</p><h1>${h(lesson.title)}</h1><p class="lead">${h(course.question)}</p><div class="reading-tools"><span>导读约 ${minutes} 分钟 · 深入学习含教材与项目</span><button id="fontBtn" class="text-button">切换大字</button><button id="printBtn" class="text-button">打印 / 存为 PDF</button></div>${stageNav(id, stageKey)}</section><div class="container reading-layout"><aside class="toc"><p class="eyebrow">本节导航</p>${sections.map(([anchor, title], i) => `<a href="#${anchor}" data-scroll="${anchor}"><span>0${i + 1}</span>${title}</a>`).join('')}<p class="muted small">先尝试作答，再展开解析。<br>每次只需向前一步。</p></aside><article class="reader">
+    <section id="principle" class="lesson-section"><p class="eyebrow">01 / UNDERSTAND</p><h2>先把原理说清楚</h2>${lesson.lesson.map(p => `<p>${h(p)}</p>`).join('')}</section>
+    <section id="concepts" class="lesson-section"><p class="eyebrow">02 / CONCEPTS</p><h2>抓住关键概念</h2><dl class="concepts">${lesson.concepts.map(c => `<div><dt>${h(c.term)}</dt><dd>${h(c.explanation)}</dd></div>`).join('')}</dl></section>
+    <section id="example" class="lesson-section"><p class="eyebrow">03 / WORKED EXAMPLE</p><h2>一起推演一个问题</h2><div class="example panel"><h3>${h(lesson.workedExample.question)}</h3><ol>${lesson.workedExample.reasoning.map(step => `<li>${h(step)}</li>`).join('')}</ol><p class="example-answer"><b>推演结论</b><br>${h(lesson.workedExample.answer)}</p></div>${stageKey === 'beginner' ? labMarkup(id) : ''}</section>
+    <section id="practice" class="lesson-section"><p class="eyebrow">04 / RETRIEVE & APPLY</p><h2>合上讲解，试着回答</h2><h3>${h(lesson.exercise.question)}</h3><label for="practiceAnswer" class="muted small">你的推理（自动保存到当前浏览器）</label><textarea id="practiceAnswer" rows="5" placeholder="先独立写下结论、依据和不确定之处…"></textarea><details><summary>展开参考答案与评分要点</summary><p>${h(lesson.exercise.answer)}</p>${list(lesson.exercise.rubric)}</details><h3 class="quiz-title">快速自测</h3><form id="quizForm">${lesson.quiz.map(quizBlock).join('')}<button class="button primary" type="submit">检查答案</button><p id="quizSummary" role="status"></p></form></section>
+    <section id="project" class="lesson-section"><p class="eyebrow">05 / BUILD SOMETHING</p><h2>${h(lesson.project.title)}</h2><p>${h(lesson.project.brief)}</p><h3>交付成果</h3>${list(lesson.project.deliverables)}<h3>评价标准</h3>${list(lesson.project.rubric)}<details><summary>与 AI 导师深入讨论</summary><p class="muted small">复制到你选择的 AI 工具使用；请对照本节来源核实回答。</p>${lesson.prompts.map(prompt => `<div class="prompt"><p>${h(prompt)}</p><button class="button secondary copy-prompt" type="button">复制导师提示</button></div>`).join('')}</details><label class="check-label"><input type="checkbox" id="projectCheck" ${storage.get(key('project', id, stageKey)) === '1' ? 'checked' : ''}> 我已按评价标准完成本节项目（自评）</label></section>
+    <section id="sources" class="lesson-section"><p class="eyebrow">06 / GO DEEPER</p><h2>向真正的学科课程迈进</h2>${sourceCards(course)}<h3>学习笔记</h3><label for="noteBox" class="muted small">记录今天学到了什么、还缺哪些证据，以及下一步读什么。</label><textarea id="noteBox" rows="6" placeholder="我的理解、疑问与阅读记录…"></textarea><p id="saveStatus" class="muted small" role="status">笔记保存在当前浏览器，可在学习台导出备份。</p><div class="completion panel"><h3>记录这一小步</h3><p>研习进度、测验结果与项目自评分开记录。每次完成后，1、3、7、14 天的复习间隔逐级增加；测验后仍应检验能否独立迁移。</p><button id="completeBtn" class="button primary">${done(id, stageKey) ? '已研习 · 再次复习完成' : '标记已研习，加入复习'}</button><p id="completionStatus" role="status" class="muted small"></p></div><div class="next-links"><a href="#/domain/${id}">返回领域路径</a><a href="${index < 2 ? `#/domain/${id}/stage/${STAGES[index + 1].key}` : '#/explore'}">${index < 2 ? `下一步：${STAGES[index + 1].label}` : '探索其他领域'} →</a></div>${store()}</section></article></div>`, `${d.title} · ${STAGES[index].label}`, () => bindLesson(id, stageKey, lesson));
 }
-
-function renderCoreConcepts(content) {
-  if (Array.isArray(content.core_concepts) && content.core_concepts.length) {
-    return `
-      <section class="reading-section">
-        <h2>核心概念</h2>
-        <div class="concept-grid">
-          ${content.core_concepts.map((concept, index) => `
-            <article class="concept-card">
-              <span>${String(index + 1).padStart(2, '0')}</span>
-              <h3>${h(concept.title)}</h3>
-              <p>${h(concept.description)}</p>
-            </article>
-          `).join('')}
-        </div>
-      </section>
-    `;
+function bindLesson(id, stageKey, lesson) {
+  if (stageKey === 'beginner') bindLab(id);
+  $$('[data-scroll]').forEach(link => link.addEventListener('click', event => { event.preventDefault(); document.getElementById(link.dataset.scroll)?.scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' }); }));
+  $('#fontBtn').addEventListener('click', () => { storage.set('wanwuzhi:font', document.documentElement.dataset.font === 'large' ? 'normal' : 'large'); applyPreferences(); });
+  $('#printBtn').addEventListener('click', () => window.print());
+  for (const [selector, type] of [['#noteBox', 'note'], ['#practiceAnswer', 'practice']]) {
+    const field = $(selector); field.value = storage.get(key(type, id, stageKey)) || '';
+    field.addEventListener('input', () => { storage.set(key(type, id, stageKey), field.value); $('#saveStatus').textContent = storageFailed ? '本地保存受限，请手动复制备份。' : '已自动保存到当前浏览器'; });
   }
-
-  return `
-    <section class="reading-section">
-      <h2>学习内容清单</h2>
-      <div class="module-list">
-        ${content.modules.map((module, index) => moduleBlock(module, index)).join('')}
-      </div>
-    </section>
-  `;
+  $('#projectCheck').addEventListener('change', event => storage.set(key('project', id, stageKey), event.target.checked ? '1' : '0'));
+  $$('.copy-prompt').forEach(button => button.addEventListener('click', async () => { try { await navigator.clipboard.writeText(button.previousElementSibling.textContent); toast('导师提示已复制'); } catch { toast('复制受限，请选中文字后手动复制'); } }));
+  $('#quizForm').addEventListener('submit', event => {
+    event.preventDefault();
+    if (lesson.quiz.some((_, i) => !$(`input[name="quiz-${i}"]:checked`))) { toast('请先回答全部自测题'); return; }
+    let correct = 0;
+    lesson.quiz.forEach((q, i) => { const passed = Number($(`input[name="quiz-${i}"]:checked`).value) === q.correct; if (passed) correct++; const result = $(`.quiz[data-index="${i}"] .quiz-feedback`); result.textContent = `${passed ? '✓ 正确' : '再想一想'}。正确选项：${q.options[q.correct]}。${q.explanation}`; result.className = `quiz-feedback ${passed ? 'correct' : 'incorrect'}`; });
+    storage.set(key('quiz', id, stageKey), JSON.stringify({ correct, total: lesson.quiz.length, at: Date.now(), version: VERSION }));
+    $('#quizSummary').textContent = `本次答对 ${correct}/${lesson.quiz.length}。${correct === lesson.quiz.length ? '尝试换一个情境解释原理，再完成项目。' : '回到讲解，找出推理差异后重试。'}`;
+  });
+  $('#completeBtn').addEventListener('click', () => {
+    storage.set(key('progress', id, stageKey), 'done');
+    const old = getRecord(id, stageKey);
+    const interval = [1, 3, 7, 14, 30][Math.min(old?.round || 0, 4)];
+    const record = { round: (old?.round || 0) + 1, last: Date.now(), due: Date.now() + interval * 86400000 };
+    storage.set(key('review', id, stageKey), JSON.stringify(record));
+    $('#completeBtn').textContent = '已记录本次研习'; $('#completeBtn').disabled = true;
+    $('#completionStatus').textContent = `下次复习：${new Date(record.due).toLocaleDateString('zh-CN')}。可在学习台查看。`;
+    toast('进度已保存，下一次复习见');
+  });
+  const updateProgress = () => { const span = document.documentElement.scrollHeight - innerHeight; $('#readingProgress')?.style.setProperty('width', `${span > 0 ? Math.min(100, scrollY / span * 100) : 100}%`); };
+  window.addEventListener('scroll', updateProgress, { passive: true }); updateProgress();
+  cleanup = () => window.removeEventListener('scroll', updateProgress);
 }
-
-function renderAdvancedLearningSections(content) {
-  return `
-    ${renderKnowledgeMap(content.knowledgeMap, content.undergraduateBenchmark)}
-    ${renderFrameworks(content.frameworks)}
-    ${renderMethods(content.methods)}
-    ${renderCases(content.cases)}
-    ${renderDebates(content.debates)}
-    ${renderGlossary(content.glossary)}
-    ${renderCapstone(content.capstone, content.readingPlan)}
-  `;
+const PATHS = [
+  { title: '判断与证据', description: '先学会怎样知道，再讨论知道什么。', ids: [3, 82, 55, 63, 98] },
+  { title: '理解人和社会', description: '从个人心理，走向历史与制度。', ids: [1, 2, 11, 21, 22, 94] },
+  { title: '经济与组织', description: '从稀缺和选择，理解市场与商业。', ids: [31, 32, 33, 41, 45, 49] },
+  { title: '自然与数字世界', description: '用模型、实验和计算理解机制。', ids: [55, 51, 52, 53, 54, 61, 62] },
+  { title: '表达与日常生活', description: '让理解变成创作与生活的能力。', ids: [81, 71, 73, 79, 83, 91] }
+];
+function roadmap() {
+  layout(`<section class="container block"><p class="eyebrow">LEARN WITH INTENTION</p><h1>学习不是收集，<br>是一步步建立理解。</h1><p class="lead">先选一条主线，每周留出 3–5 小时。建议读原理、做闭卷回忆、完成练习，再读教材，最后做项目。以下是起步顺序，可按先修能力调整。</p><div class="path-grid">${PATHS.map((p, i) => `<article class="path panel"><p class="eyebrow">PATH 0${i + 1}</p><h2>${p.title}</h2><p>${p.description}</p><ol>${p.ids.map(id => `<li><a href="#/domain/${id}">${h(state.domains.find(d => d.id === id).title)} ↗</a></li>`).join('')}</ol></article>`).join('')}</div><div class="learning-contract"><h2>怎样检验本科阶段的能力？</h2><p>逐步完成对应大学教材与课程习题，写出可复核的推导或证据链，比较竞争性解释，并完成受评价的综合项目。本站导读、自测和自评不构成学位、专业资格或能力认证。</p><ol><li>基础：能不看资料解释概念，并给出反例。</li><li>进阶：能用方法解决新问题，注明假设与限制。</li><li>综合：能检索原始资料，完成项目，并根据反馈修订。</li></ol></div></section>`, '学习路径');
 }
-
-function renderKnowledgeMap(map, benchmark) {
-  if (!map) return '';
-  return `
-    <section class="reading-section knowledge-map">
-      <div class="section-kicker">本科优秀毕业生基准</div>
-      <h2>知识地图</h2>
-      <p class="benchmark">${h(benchmark || map.outputStandard)}</p>
-      <div class="wide-grid">
-        <article>
-          <h3>中心问题</h3>
-          <p>${h(map.centralQuestion)}</p>
-        </article>
-        <article>
-          <h3>先修能力</h3>
-          <ul>${(map.prerequisites || []).map((item) => `<li>${h(item)}</li>`).join('')}</ul>
-        </article>
-        <article>
-          <h3>学习结构</h3>
-          <ul>${(map.structure || []).map((item) => `<li>${h(item)}</li>`).join('')}</ul>
-        </article>
-        <article>
-          <h3>输出标准</h3>
-          <p>${h(map.outputStandard)}</p>
-        </article>
-      </div>
-    </section>
-  `;
+function download(filename, content, type = 'application/json') { const url = URL.createObjectURL(new Blob([content], { type })); const a = document.createElement('a'); a.href = url; a.download = filename; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); }
+function dashboard() {
+  const progress = state.domains.flatMap(d => STAGES.map(s => ({ d, s, read: done(d.id, s.key), review: getRecord(d.id, s.key) })));
+  const completed = progress.filter(p => p.read);
+  const due = progress.filter(p => p.review && p.review.due <= Date.now());
+  const favorites = state.domains.filter(d => fav(d.id));
+  layout(`<section class="container block"><p class="eyebrow">YOUR LEARNING DESK</p><h1>把每次理解，留在这里。</h1><p class="lead">记录保存在当前浏览器。电脑与手机可通过导出、导入备份接续学习。</p><div class="metrics"><div><b>${completed.length}<small>/300</small></b><span>已研习阶段</span></div><div><b>${due.length}</b><span>今天可复习</span></div><div><b>${favorites.length}</b><span>收藏领域</span></div><div><b>${progress.filter(p => storage.get(key('project', p.d.id, p.s.key)) === '1').length}</b><span>项目自评完成</span></div></div><div class="actions"><button id="exportBtn" class="button secondary">导出学习备份</button><label class="button secondary" for="importFile">导入学习备份</label><input id="importFile" type="file" accept="application/json,.json" hidden><button id="notesExport" class="button secondary">导出笔记文本</button></div><p id="importStatus" role="status" class="muted small"></p></section>
+    <section class="container block">${sectionHead('SPACED PRACTICE', '复习，让理解留下来')}<div class="review-list">${due.length ? due.map(p => `<a class="review-item" href="#/domain/${p.d.id}/stage/${p.s.key}"><div><b>${h(p.d.title)}</b><span>${p.s.label} · 第 ${p.review.round} 次研习后复习</span></div><span>现在回忆 →</span></a>`).join('') : '<p class="empty">今天没有到期复习。完成一节研习后，会自动安排下一次回顾。</p>'}</div></section>
+    <section class="container block">${sectionHead('YOUR COLLECTION', '好奇心的书签')}<div class="domain-grid">${favorites.length ? favorites.map(card).join('') : '<p class="empty">在知识地图点击 ☆，把感兴趣的领域留在这里。</p>'}</div></section>
+    <section class="container block">${sectionHead('LEARNING RECORD', '最近的学习记录')}<div class="review-list">${completed.sort((a, b) => (b.review?.last || 0) - (a.review?.last || 0)).slice(0, 30).map(p => { let q; try { q = JSON.parse(storage.get(key('quiz', p.d.id, p.s.key))); } catch {} return `<a class="review-item" href="#/domain/${p.d.id}/stage/${p.s.key}"><div><b>${h(p.d.title)} · ${p.s.label}</b><span>${q ? `最近自测 ${h(q.correct)}/${h(q.total)}` : '尚无新版自测记录'} · ${p.review ? `下次复习 ${new Date(p.review.due).toLocaleDateString('zh-CN')}` : '旧版阅读记录'}</span></div><span>继续 →</span></a>`; }).join('') || '<p class="empty">从一个领域开始，你的记录会出现在这里。</p>'}</div></section>`, '学习台', bindDashboard);
 }
-
-function renderFrameworks(frameworks = []) {
-  if (!frameworks.length) return '';
-  return `
-    <section class="reading-section">
-      <div class="section-kicker">Theory</div>
-      <h2>理论框架</h2>
-      <div class="framework-grid">
-        ${frameworks.map((item) => `
-          <article class="framework-card">
-            <h3>${h(item.name)}</h3>
-            <p>${h(item.use)}</p>
-            <small>${h(item.caution)}</small>
-          </article>
-        `).join('')}
-      </div>
-    </section>
-  `;
+function validBackupKey(k) { return /^wanwuzhi:(progress|note|practice|quiz|project|review):([1-9]\d?|100):(beginner|intermediate|advanced)$/.test(k) || /^wanwuzhi:fav:([1-9]\d?|100)$/.test(k); }
+function validBackupValue(k, value) {
+  if (/:progress:/.test(k)) return value === 'done';
+  if (/:(fav|project):/.test(k)) return value === '1' || value === '0';
+  if (/:quiz:/.test(k)) { try { const q = JSON.parse(value); return q && Number.isInteger(q.correct) && Number.isInteger(q.total) && q.correct >= 0 && q.correct <= q.total && q.total > 0 && q.total < 100; } catch { return false; } }
+  if (/:review:/.test(k)) { try { const r = JSON.parse(value); return r && Number.isInteger(r.round) && r.round > 0 && r.round < 10000 && Number.isFinite(r.last) && Number.isFinite(r.due) && r.last > 0 && r.due > 0 && r.due < 8e15; } catch { return false; } }
+  return true;
 }
-
-function renderMethods(methods = []) {
-  if (!methods.length) return '';
-  return `
-    <section class="reading-section">
-      <div class="section-kicker">Method</div>
-      <h2>研究方法</h2>
-      <div class="method-list">
-        ${methods.map((method) => `
-          <article class="method-card">
-            <h3>${h(method.name)}</h3>
-            <ol>${(method.steps || []).map((step) => `<li>${h(step)}</li>`).join('')}</ol>
-            <p><b>产出：</b>${h(method.deliverable)}</p>
-          </article>
-        `).join('')}
-      </div>
-    </section>
-  `;
-}
-
-function renderCases(cases = []) {
-  if (!cases.length) return '';
-  return `
-    <section class="reading-section">
-      <div class="section-kicker">Case Lab</div>
-      <h2>案例分析实验室</h2>
-      <div class="case-grid">
-        ${cases.map((item) => `
-          <article class="case-card">
-            <h3>${h(item.title)}</h3>
-            <p>${h(item.scene)}</p>
-            <ul>${(item.analysis || []).map((line) => `<li>${h(line)}</li>`).join('')}</ul>
-            <small>${h(item.task)}</small>
-          </article>
-        `).join('')}
-      </div>
-    </section>
-  `;
-}
-
-function renderDebates(debates = []) {
-  if (!debates.length) return '';
-  return `
-    <section class="reading-section">
-      <div class="section-kicker">Debate</div>
-      <h2>经典争议</h2>
-      <div class="debate-list">
-        ${debates.map((item) => `
-          <article class="debate-card">
-            <h3>${h(item.question)}</h3>
-            <div class="debate-columns">
-              <p><b>立场 A：</b>${h(item.positionA)}</p>
-              <p><b>立场 B：</b>${h(item.positionB)}</p>
-            </div>
-            <small>${h(item.synthesis)}</small>
-          </article>
-        `).join('')}
-      </div>
-    </section>
-  `;
-}
-
-function renderGlossary(glossary = []) {
-  if (!glossary.length) return '';
-  return `
-    <section class="reading-section">
-      <div class="section-kicker">Glossary</div>
-      <h2>术语表</h2>
-      <div class="glossary-grid">
-        ${glossary.map((item) => `
-          <article>
-            <strong>${h(item.term)}</strong>
-            <p>${h(item.definition)}</p>
-          </article>
-        `).join('')}
-      </div>
-    </section>
-  `;
-}
-
-function renderCapstone(capstone, readingPlan = []) {
-  if (!capstone) return '';
-  return `
-    <section class="reading-section capstone">
-      <div class="section-kicker">Capstone</div>
-      <h2>综合任务</h2>
-      <div class="capstone-layout">
-        <article>
-          <h3>${h(capstone.title)}</h3>
-          <p>${h(capstone.brief)}</p>
-          <p><b>最终产出：</b>${h(capstone.output)}</p>
-          <h4>评分 Rubric</h4>
-          <ul>${(capstone.rubric || []).map((item) => `<li><b>${h(item.criterion)}：</b>${h(item.standard)}</li>`).join('')}</ul>
-        </article>
-        <article>
-          <h3>四周学习节奏</h3>
-          <ol>${readingPlan.map((item) => `<li>${h(item)}</li>`).join('')}</ol>
-        </article>
-      </div>
-    </section>
-  `;
-}
-
-function moduleBlock(module, index) {
-  return `
-    <details class="module" ${index === 0 ? 'open' : ''}>
-      <summary>
-        <span>${String(index + 1).padStart(2, '0')}</span>
-        <strong>${h(module.title)}</strong>
-        <small>${h(module.focus)} · ${module.estimatedMinutes} 分钟</small>
-      </summary>
-      ${module.academicDepth ? `<p class="academic-depth">${h(module.academicDepth)}</p>` : ''}
-      <ul>${module.keyPoints.map((point) => `<li>${h(point)}</li>`).join('')}</ul>
-      ${module.commonMistake ? `<p class="common-mistake"><b>常见误区：</b>${h(module.commonMistake)}</p>` : ''}
-      <p><b>实践：</b>${h(module.practice)}</p>
-      <div class="checks">
-        ${module.checklist.map((item) => `<label><input type="checkbox" /> ${h(item)}</label>`).join('')}
-      </div>
-    </details>
-  `;
-}
-
-function exerciseBlock(exercise) {
-  return `
-    <article class="exercise">
-      <small>${h(exercise.type)}</small>
-      <h3>${h(exercise.question)}</h3>
-      ${exercise.options ? `<div class="options">${exercise.options.map((option) => `<button type="button">${h(option)}</button>`).join('')}</div>` : ''}
-      <button class="answer-toggle" type="button">查看参考答案</button>
-      <p class="answer">${h(exercise.answer)}${exercise.explanation ? `<br />${h(exercise.explanation)}` : ''}</p>
-    </article>
-  `;
-}
-
-function renderLockedStage(domain, stageKey) {
-  const previous = stageKey === 'intermediate' ? STAGE_BY_KEY.beginner : STAGE_BY_KEY.intermediate;
-  layout(`
-    <section class="page-head domain-head">
-      <p class="eyebrow">${h(domain.chapterTitle)}</p>
-      <h1>${h(domain.title)}</h1>
-      <p>这个阶段还没有解锁。先完成${previous.label}，系统会自动记录进度并开放下一阶段。</p>
-      ${stageProgressNav(domain.id, stageKey)}
-    </section>
-    <section class="locked-panel">
-      <div>
-        <span class="lock-icon">锁</span>
-        <h2>阶段待解锁</h2>
-        <p>渐进学习的价值在于先搭地基，再上结构。完成前置阶段后，这里会平滑切换为可阅读状态。</p>
-        <a class="primary" href="#/domain/${domain.id}/stage/${previous.key}">前往${previous.label}</a>
-      </div>
-    </section>
-  `);
-}
-
-async function renderStage(id, stageKey) {
-  const domain = state.domains.find((item) => item.id === Number(id));
-  const stage = STAGE_BY_KEY[stageKey];
-  if (!domain || !stage) return render404();
-  if (!isStageUnlocked(domain.id, stageKey)) return renderLockedStage(domain, stageKey);
-
-  let content;
-  try {
-    content = await loadStage(id, stageKey);
-  } catch (error) {
-    layout(`<section class="page-head"><h1>内容校验失败</h1><p>${h(error.message)}</p></section>`);
-    return;
-  }
-
-  const currentIndex = STAGES.findIndex((item) => item.key === stageKey);
-  const next = STAGES[currentIndex + 1];
-  const hook = content.hook || content.intro;
-
-  layout(`
-    <section class="reader-shell">
-      <div class="reader-head">
-        <p class="eyebrow">${h(content.chapterTitle)}</p>
-        <h1>${h(content.domainTitle)} · ${h(content.stageLabel)}</h1>
-        <p>${h(hook)}</p>
-        ${stageProgressNav(domain.id, stageKey)}
-        <div class="actions">
-          <button id="completeBtn" class="primary" type="button">${isDone(domain.id, stageKey) ? '取消完成' : '阅读完毕，解锁下一阶段'}</button>
-          <button class="secondary js-theme" type="button">切换阅读模式</button>
-        </div>
-      </div>
-    </section>
-
-    <section class="split reader-meta">
-      <div>
-        <h2>学习目标</h2>
-        <ul>${content.learningGoals.map((goal) => `<li>${h(goal)}</li>`).join('')}</ul>
-      </div>
-      <div>
-        <h2>阶段信息</h2>
-        <p>适合对象：${h(content.stageAudience)}</p>
-        <p>难度：${h(content.difficulty)}</p>
-      </div>
-    </section>
-
-    ${renderCoreConcepts(content)}
-    ${renderAdvancedLearningSections(content)}
-
-    <section class="reading-section">
-      <h2>练习巩固</h2>
-      <div class="exercise-list">${content.exercises.map(exerciseBlock).join('')}</div>
-    </section>
-
-    <section class="split">
-      <div>
-        <h2>学习笔记</h2>
-        <textarea id="noteBox" placeholder="记录你的理解、疑问和下一步行动"></textarea>
-      </div>
-      <div>
-        <h2>下一步</h2>
-        <p>${h(content.nextAction || (next ? `完成后进入${next.label}` : '你已经完成该领域三阶段学习。'))}</p>
-        ${next ? `<a class="secondary" href="#/domain/${domain.id}/stage/${next.key}">查看${next.label}</a>` : '<a class="secondary" href="#/explore">继续探索其他领域</a>'}
-      </div>
-    </section>
-
-    ${BookRecommendation({
-      currentDomain: content.domain || content.domainTitle,
-      currentStage: content.stage || content.stageLabel
-    })}
-  `, {
-    bind: () => {
-      bindStagePage(domain.id, stageKey, next);
-      bindBookRecommendation();
-    }
+function bindDashboard() {
+  const importLabel = document.querySelector('label[for="importFile"]');
+  importLabel.tabIndex = 0;
+  importLabel.setAttribute('role', 'button');
+  importLabel.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); $('#importFile').click(); } });
+  const records = () => { const data = {}; try { for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (validBackupKey(k)) data[k] = storage.get(k); } } catch { memory.forEach((v, k) => { if (validBackupKey(k)) data[k] = v; }); } return data; };
+  $('#exportBtn').addEventListener('click', () => download('世间万物-学习备份.json', JSON.stringify({ format: 'wanwuzhi-backup-v1', exportedAt: new Date().toISOString(), data: records() }, null, 2)));
+  $('#notesExport').addEventListener('click', () => { const notes = Object.entries(records()).filter(([k]) => /:(note|practice):/.test(k)); download('世间万物-学习笔记.txt', notes.map(([k, v]) => { const [, type, id, s] = k.split(':'); return `${state.domains.find(d => d.id === Number(id)).title} / ${STAGES.find(stage => stage.key === s).label} / ${type === 'note' ? '笔记' : '练习'}\n${v}`; }).join('\n\n──────────\n\n'), 'text/plain;charset=utf-8'); });
+  $('#importFile').addEventListener('change', async event => {
+    try {
+      const file = event.target.files[0]; if (!file) return;
+      if (file.size > 5 * 1024 * 1024) throw new Error('备份文件须小于 5 MB。');
+      const backup = JSON.parse(await file.text());
+      if (backup.format !== 'wanwuzhi-backup-v1' || !backup.data || typeof backup.data !== 'object' || Array.isArray(backup.data)) throw new Error('无法识别的备份格式。');
+      const entries = Object.entries(backup.data);
+      if (entries.some(([k, v]) => !validBackupKey(k) || typeof v !== 'string' || v.length > 100000 || !validBackupValue(k, v))) throw new Error('备份含不支持的数据。');
+      // Preserve existing entries; import can be safely repeated without destroying local work.
+      let imported = 0;
+      for (const [k, v] of entries) if (storage.get(k) === null) { storage.set(k, v); imported++; }
+      dashboard(); $('#importStatus').textContent = `已导入 ${imported} 条新记录；本机已有记录已保留。`;
+    } catch (error) { $('#importStatus').textContent = error.message; }
   });
 }
-
-function bindStagePage(domainId, stageKey, next) {
-  $('#completeBtn')?.addEventListener('click', () => {
-    const nextValue = !isDone(domainId, stageKey);
-    setDone(domainId, stageKey, nextValue);
-    toast(nextValue && next ? `${next.label}已解锁` : nextValue ? '该领域已完成' : '已取消完成状态');
-    window.setTimeout(() => renderStage(domainId, stageKey), 220);
-  });
-
-  const noteBox = $('#noteBox');
-  if (noteBox) {
-    noteBox.value = localStorage.getItem(noteKey(domainId, stageKey)) || '';
-    noteBox.addEventListener('input', () => localStorage.setItem(noteKey(domainId, stageKey), noteBox.value));
-  }
-
-  $$('.answer-toggle').forEach((button) => {
-    button.addEventListener('click', () => button.nextElementSibling.classList.toggle('show'));
+async function search(token) {
+  state.index ||= await json('data/curriculum-index.json'); if (token !== routeVersion) return;
+  layout(`<section class="container block"><p class="eyebrow">FOLLOW A QUESTION</p><h1>找到问题背后的知识。</h1><label class="search-label" for="globalSearch">全文搜索：概念、讲解、算例和练习</label><input class="search-input" id="globalSearch" type="search" placeholder="试试：机会成本、熵、证据、构图"><p id="searchCount" role="status" class="muted"></p><div id="searchResults" class="review-list"></div></section>`, '搜索', () => {
+    const input = $('#globalSearch');
+    const run = () => { const q = input.value.trim().toLowerCase(); const words = q.split(/\s+/).filter(Boolean); const items = words.length ? state.index.filter(item => words.every(word => `${item.title} ${item.text}`.toLowerCase().includes(word))) : []; $('#searchCount').textContent = q ? `找到 ${items.length} 节研习${items.length > 60 ? '，显示前 60 项' : ''}` : '输入一个概念，追踪它在不同领域中的联系。'; $('#searchResults').innerHTML = items.slice(0, 60).map(item => { const d = state.domains.find(d => d.id === item.domainId); const pos = item.text.toLowerCase().indexOf(words[0]); const excerpt = item.text.slice(Math.max(0, pos - 35), Math.max(0, pos - 35) + 160); return `<a class="search-result" href="#/domain/${item.domainId}/stage/${item.stageKey}"><span class="eyebrow">${h(d.title)} · ${STAGES.find(s => s.key === item.stageKey).label}</span><h2>${h(item.title)} ↗</h2><p>${h(excerpt)}…</p></a>`; }).join('') || (q ? '<p class="empty">未找到匹配内容，试试更短的关键词。</p>' : ''); };
+    input.value = new URLSearchParams(location.hash.split('?')[1]).get('q') || ''; input.addEventListener('input', run); run();
   });
 }
-
-function BookRecommendation({ currentDomain, currentStage }) {
-  const matched = state.books.filter((book) => book.ExplorationDomain === currentDomain && book.LearningStage === currentStage);
-  const body = state.booksError
-    ? `<div class="empty commercial-empty">书籍数据暂时加载失败：${h(state.booksError.message)}</div>`
-    : matched.length
-      ? `<div class="book-grid">${matched.map(bookCard).join('')}</div>`
-      : '<div class="empty commercial-empty">该阶段推荐书籍正在精心挑选整理中...</div>';
-
-  return `
-    <section class="book-recommendation" aria-labelledby="bookRecommendationTitle">
-      <div class="recommend-head">
-        <div>
-          <p class="eyebrow">Book Commerce</p>
-          <h2 id="bookRecommendationTitle">推荐书目</h2>
-          <p>${h(currentDomain)} · ${h(currentStage)}</p>
-        </div>
-        <button class="store-entry js-qr-open" type="button" data-title="万物小店橱窗" data-src="/qr/store-qr.png" data-hint="扫码进入万物小店橱窗，探索更多好书">
-          <img src="${asset('/qr/store-qr.png')}" alt="万物小店橱窗二维码" />
-          <span>扫码进入万物小店橱窗，探索更多好书</span>
-        </button>
-      </div>
-      ${body}
-    </section>
-  `;
+function about() {
+  layout(`<section class="container block narrow"><p class="eyebrow">OUR LEARNING STANDARD</p><h1>让每一次学习，<br>经得起追问。</h1><h2>内容是什么</h2><p>100 个领域按入门、进阶、综合研习组织，提供原创导读、概念辨析、具体推演、带参考答案的练习、自测和项目。课程中的教学情境与数值案例用于练习，不视为实际研究数据。外部教材与大学课程是继续深入的主要材料。</p><h2>本科水平怎样实现</h2><p>优秀本科毕业生的能力需要系统课程、长时间练习、项目与有质量的反馈。本站提供路径与起点；阶段完成、单题自测和项目自评记录学习活动，不证明已经达到该学科毕业标准。</p><h2>来源与不确定性</h2><p>优先链接大学公开课、开放教材、学术百科和公共机构原始资源。资料多为英文，使用翻译时应核对术语、年代和公式。区分可观察事实、模型假设、理论解释与价值判断；历史与哲学的争议保留竞争性解释。本站导读由 AI 辅助编写，已作结构与内容抽检，尚未经各领域专家逐篇同行评审。</p><h2>如何使用 AI 导师</h2><p>每节课附有可复制的导师提示。要求导师一次提一个问题，先等待你的解释，再指出推理缺口，核对来源并明确未知。本站不内置在线 AI，不要求 API 密钥，也不会自动发送笔记。</p><h2>生活中的专业问题</h2><p>医学、法律、金融等内容用于一般知识学习。涉及个人治疗、合同、权益或投资决定，应结合所在地现行规则与合格专业人员的意见。</p><h2>记录与隐私</h2><p>笔记、练习、收藏和进度保存在浏览器本地，无账户与云同步。导出备份可跨设备导入；导入只补充尚不存在的记录。清理浏览器数据前请导出备份。</p><h2>开放阅读与小店</h2><p>教材入口与商业购买分开。保留原有微信小店二维码，商品与价格以橱窗为准。旧版未经核实的占位书名和 ISBN 不再作为推荐展示。</p><a class="button primary" href="#/explore">开始探索 ↗</a></section>`, '内容标准');
 }
-
-function bookCard(book) {
-  const cta = renderBookCta(book);
-  return `
-    <article class="book-card">
-      <small>${h(book.ID)}</small>
-      <h3>${h(book.title)}</h3>
-      <p class="author">${h(book.author)}</p>
-      <p>${h(book.description)}</p>
-      ${cta}
-    </article>
-  `;
-}
-
-function renderBookCta(book) {
-  if (book.purchaseType === 'url' && book.purchaseUrl) {
-    return `<a class="book-cta" href="${h(book.purchaseUrl)}" target="_blank" rel="noopener noreferrer">前往购买</a>`;
-  }
-
-  if (book.purchaseType === 'qrcode' && book.purchaseQrCode) {
-    return `
-      <button
-        class="book-cta js-book-qr"
-        type="button"
-        data-title="${h(book.title)}"
-        data-src="${h(book.purchaseQrCode)}">
-        微信扫码购买
-      </button>
-    `;
-  }
-
-  return '<button class="book-cta disabled" type="button" disabled>购买链接待补充</button>';
-}
-
-function bindBookRecommendation() {
-  $$('.js-book-qr').forEach((button) => {
-    button.addEventListener('click', () => {
-      showQrModal({
-        title: button.dataset.title,
-        src: button.dataset.src,
-        hint: '长按识别二维码，前往微信视频号橱窗购买'
-      });
-    });
-  });
-}
-
-function renderRoadmap() {
-  layout(`
-    <section class="page-head">
-      <p class="eyebrow">Roadmap</p>
-      <h1>从入门到精通的学习路径</h1>
-      <p>每个领域遵循三阶段学习：先看见问题，再拆解机制，最后形成自己的判断和作品。</p>
-    </section>
-    <section class="roadmap">
-      ${[
-        ['选择篇章', '先确定兴趣或问题所在的知识宇宙。'],
-        ['完成入门', '建立概念边界和常识地图。'],
-        ['进入进阶', '分析机制、案例和工具。'],
-        ['挑战专家', '进行批判评估与综合应用。'],
-        ['形成作品', '沉淀笔记、书单或主题作品。']
-      ].map((item, index) => `
-        <article>
-          <span>${index + 1}</span>
-          <h2>${item[0]}</h2>
-          <p>${item[1]}</p>
-        </article>
-      `).join('')}
-    </section>
-    <section class="chapter-rail padded">
-      ${state.chapters.map((chapter) => `
-        <a class="chapter-card" href="#/explore?chapter=${chapter.id}" style="--chapter-image:url('${chapterImage(chapter.id)}')">
-          <small>${h(chapter.number)}</small>
-          <strong>${h(chapter.title)}</strong>
-          <span>${chapter.domainCount || 10} 个领域</span>
-        </a>
-      `).join('')}
-    </section>
-  `);
-}
-
-function renderDashboard() {
-  const done = STAGES.flatMap((stage) => state.domains.map((domain) => isDone(domain.id, stage.key))).filter(Boolean).length;
-  const favorites = state.domains.filter((domain) => isFav(domain.id));
-  const pct = Math.round(done / 300 * 100);
-
-  layout(`
-    <section class="page-head">
-      <p class="eyebrow">Dashboard</p>
-      <h1>我的学习台</h1>
-      <p>进度、收藏和笔记保存在本机浏览器中。换设备后不会自动同步。</p>
-    </section>
-    <section class="dashboard">
-      <div class="ring" style="--p:${pct}">
-        <b>${pct}%</b>
-        <span>${done}/300</span>
-      </div>
-      <div>
-        <h2>学习徽章</h2>
-        <div class="badges">
-          <span>启程者</span>
-          <span>${done >= 10 ? '十阶段学习者' : '待解锁'}</span>
-          <span>${done >= 100 ? '百域探索者' : '待解锁'}</span>
-        </div>
-        <h2>我的收藏</h2>
-        <div class="domain-grid small">
-          ${favorites.length ? favorites.map((domain) => domainCard(domain)).join('') : '<p class="empty">尚未收藏领域</p>'}
-        </div>
-      </div>
-    </section>
-  `, { bind: bindExploreButtons });
-}
-
-async function renderSearch() {
-  if (!state.searchIndex.length) state.searchIndex = await getJson('/content/search-index.json');
-  layout(`
-    <section class="page-head">
-      <p class="eyebrow">Search</p>
-      <h1>搜索知识内容</h1>
-      <p>检索 300 份阶段内容中的模块标题、摘要、领域与篇章。</p>
-    </section>
-    <section class="tools">
-      <input id="globalSearch" type="search" autofocus placeholder="输入关键词，如 哲学、宇宙、创业、AI" />
-    </section>
-    <section id="searchResults" class="results"></section>
-  `, {
-    bind: () => {
-      const input = $('#globalSearch');
-      const results = $('#searchResults');
-      const run = () => {
-        const query = input.value.trim().toLowerCase();
-        if (!query) {
-          results.innerHTML = '<p class="empty">请输入关键词开始搜索。</p>';
-          return;
-        }
-        const list = state.searchIndex
-          .filter((item) => `${item.title}${item.excerpt}${item.domainTitle}${item.chapterTitle}`.toLowerCase().includes(query))
-          .slice(0, 60);
-        results.innerHTML = list.map((item) => `
-          <a class="result" href="${h(item.url)}">
-            <small>${h(item.chapterTitle)} / ${h(item.stageLabel)}</small>
-            <strong>${h(item.title)}</strong>
-            <p>${h(item.excerpt)}</p>
-          </a>
-        `).join('') || '<p class="empty">没有匹配结果。</p>';
-      };
-      input.addEventListener('input', run);
-      run();
-    }
-  });
-}
-
-function renderAdmin() {
-  const authed = sessionStorage.getItem('wanwuzhi:admin') === '1';
-  if (!authed) {
-    layout(`
-      <section class="admin-login">
-        <h1>内容管理入口</h1>
-        <input id="adminPwd" type="password" placeholder="输入管理密码" />
-        <button class="primary" id="loginBtn" type="button">进入</button>
-        <p>本地演示密码：wanwuzhi2024</p>
-      </section>
-    `, {
-      bind: () => {
-        $('#loginBtn').addEventListener('click', () => {
-          if ($('#adminPwd').value === 'wanwuzhi2024') {
-            sessionStorage.setItem('wanwuzhi:admin', '1');
-            renderAdmin();
-          } else {
-            toast('密码错误');
-          }
-        });
-      }
-    });
-    return;
-  }
-
-  layout(`
-    <section class="page-head">
-      <p class="eyebrow">Admin</p>
-      <h1>内容完整性总览</h1>
-      <p>当前版本：${state.domains.length} 个领域、300 份阶段内容、${state.books.length} 条书籍推荐。</p>
-    </section>
-    <section class="admin-table">
-      <table>
-        <thead><tr><th>ID</th><th>领域</th><th>篇章</th><th>阶段</th></tr></thead>
-        <tbody>${state.domains.map((domain) => `<tr><td>${domain.id}</td><td>${h(domain.title)}</td><td>${h(domain.chapterTitle)}</td><td>入门 / 进阶 / 专家</td></tr>`).join('')}</tbody>
-      </table>
-    </section>
-  `);
-}
-
-function render404() {
-  layout(`
-    <section class="page-head">
-      <h1>页面不存在</h1>
-      <p>请返回探索页重新选择领域。</p>
-      <a class="primary" href="#/explore">返回探索</a>
-    </section>
-  `);
-}
-
+function notFound() { layout('<section class="container block"><h1>这个入口还没有知识。</h1><p>请回到知识地图选择领域。</p><a class="button primary" href="#/explore">返回知识地图</a></section>', '页面不存在'); }
 async function router() {
+  const token = ++routeVersion;
+  cleanup(); cleanup = () => {};
   try {
-    app.innerHTML = '<main class="loading-screen"><div><span></span><h1>正在加载世间万物</h1><p>知识地图和书籍数据正在初始化...</p></div></main>';
-    await loadCore();
-
-    const hash = location.hash || '#/';
-    const clean = hash.split('?')[0];
+    if (!state.domains.length) [state.domains, state.chapters] = await Promise.all([json('data/domains.json'), json('data/chapters.json')]);
+    if (token !== routeVersion) return;
+    window.scrollTo(0, 0);
+    const route = location.hash.split('?')[0] || '#/';
     let match;
-
-    if (clean === '#/' || clean === '#') return renderHome();
-    if (clean === '#/explore') return renderExplore();
-    if (clean === '#/roadmap') return renderRoadmap();
-    if (clean === '#/dashboard') return renderDashboard();
-    if (clean === '#/search') return renderSearch();
-    if (clean === '#/admin') return renderAdmin();
-    if ((match = clean.match(/^#\/domain\/(\d+)$/))) return renderDomain(match[1]);
-    if ((match = clean.match(/^#\/domain\/(\d+)\/stage\/(beginner|intermediate|advanced)$/))) return renderStage(match[1], match[2]);
-    return render404();
-  } catch (error) {
-    console.error(error);
-    layout(`<section class="page-head"><h1>加载失败</h1><p>${h(error.message)}</p></section>`);
-  }
+    if (route === '#/' || route === '#') home();
+    else if (route === '#/explore') explore();
+    else if (route === '#/roadmap' || route === '#/learning-path') roadmap();
+    else if (route === '#/dashboard' || route === '#/my-learning') dashboard();
+    else if (route === '#/search') await search(token);
+    else if (route === '#/about' || route === '#/admin') about();
+    else if ((match = route.match(/^#\/domain\/(\d+)$/))) await domainPage(match[1], token);
+    else if ((match = route.match(/^#\/domain\/(\d+)\/stage\/(beginner|intermediate|advanced)$/))) await stagePage(match[1], match[2], token);
+    else notFound();
+  } catch (error) { if (token === routeVersion) layout(`<section class="container block"><h1>暂时无法打开资料</h1><p>${h(error.message)}</p><button class="button primary" id="retry">重新加载</button></section>`, '加载失败', () => $('#retry').addEventListener('click', router)); }
 }
-
 window.addEventListener('hashchange', router);
+applyPreferences();
 router();
