@@ -48,10 +48,14 @@ function layout(content, title = '世间万物', bind = () => {}) {
   cleanup(); cleanup = () => {};
   document.title = `${title} · 成年人的知识地图`;
   const route = location.hash.split('?')[0] || '#/';
+  const philosophyLink = route === '#/' || route === '#'
+    ? '<a class="topbar-link" href="https://jackie8410.github.io/philosophy-river/" target="_blank" rel="noopener" aria-label="思想长河（在新标签页打开）">思想长河</a>'
+    : '';
   app.innerHTML = `<a class="skip" href="#main">跳到主要内容</a>
     <header class="topbar"><a class="brand" href="#/"><span class="brand-mark">万</span><span><b>世间万物</b><small>LEARN FOR EVERYTHING</small></span></a>
     <nav aria-label="主导航">${[['#/', '首页'], ['#/explore', '知识地图'], ['#/roadmap', '学习路径'], ['#/search', '搜索'], ['#/dashboard', '学习台']].map(([url, label]) => `<a ${route === url ? 'aria-current="page"' : ''} href="${url}">${label}</a>`).join('')}</nav>
-    <button class="icon theme" aria-label="切换明暗阅读模式">◐</button></header>
+    <button class="icon theme" aria-label="切换明暗阅读模式">◐</button>
+    ${philosophyLink}</header>
     <main id="main" tabindex="-1">${content}</main>
     <footer><div><b>世间万物</b><p>从一个好问题出发，逐步理解世界。</p></div><div><a href="#/about">内容标准</a><button class="text-button qr-open">万物小店 ↗</button><span>V4 · 2026.11</span></div></footer>
     <div id="toast" role="status" aria-live="polite"></div>`;
